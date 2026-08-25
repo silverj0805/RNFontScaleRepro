@@ -12,9 +12,9 @@ React Native `maxFontSizeMultiplier`가 Android New Architecture(Fabric)에서 �
 
 ## 재현 환경
 
-- `react-native`: 0.83.1 / New Architecture (Fabric) 활성화 / Android
-- 1차 실측: Samsung Galaxy S21 (One UI)
-- 2차 실측(이번 세션, 아래 참고): Android 에뮬레이터 Pixel 8 Pro API 35 — **Samsung 기기 한정 문제가 아님을 확인**
+- `react-native`: **0.87.0** (최초 재현은 0.83.1 — 아래 "버전 업그레이드" 참고) / New Architecture (Fabric) 활성화 / Android
+- 1차 실측: Samsung Galaxy S21 (One UI) — 0.83.1 기준
+- 2차 실측: Android 에뮬레이터 Pixel 8 Pro API 35 — **Samsung 기기 한정 문제가 아님을 확인** (0.83.1 → 0.87.0 업그레이드 후에도 동일 패턴 재확인)
 
 ## 배제한 가설 (검증 완료, 재확인 불필요)
 
@@ -60,7 +60,14 @@ Android에 한해 `allowFontScaling={false}` + `fontSize`/`lineHeight`를 JS에�
 1. ✅ **GitHub에 repro repo 푸시 완료** — https://github.com/silverj0805/RNFontScaleRepro (main 브랜치에 전체 작업 포함).
 2. ✅ **이슈 본문 Additional Context에 repo URL 채워넣기 완료.**
 3. ⏭️ **실제 기기(Galaxy S21) 재검증은 사용자 판단으로 스킵** — 에뮬레이터(Pixel 8 Pro API 35) 검증 결과로 충분하다고 확인함.
-4. **이슈 본문 최종 검토 후 `facebook/react-native`에 제출.** (이슈 제출은 outward-facing 작업이라 진행 전 확인받음)
+4. ✅ **이슈 제출 완료** — `facebook/react-native`에 제출함. 이후 **"Type: Unsupported Version"** 라벨이 붙음 (당시 0.83.1은 지원 종료 버전 — RN 지원 정책은 최신 + 이전 2개 마이너까지만 지원).
+5. ✅ **RN 버전 업그레이드 완료 (0.83.1 → 0.87.0, 이 세션)**:
+   - `npx @react-native-community/cli@latest init` 로 0.87.0 스캐폴딩을 임시 디렉토리에 새로 생성 후, `android/`·`ios/`(네이티브 프로젝트) 전체와 `package.json`/`jest.config.js`/`Gemfile` 등 설정 파일을 교체.
+   - `src/`, `index.js`(단, import 경로는 `./src/App` 유지), `docs/`, `README.md`는 그대로 보존.
+   - `yarn install` 재설치, iOS는 `bundle exec pod install`까지 완료 (New Arch 양쪽 플랫폼 모두 `newArchEnabled: true` 확인).
+   - 에뮬레이터(Pixel 8 Pro API 35)에서 실제 빌드·설치 후 fontScale 1.5/2.0 재측정 → **0.83.1과 완전히 동일한 수치로 버그 재현 확인** (Test1: 35.0→40.33, Test2: 36.0→43.33, Test3: 35.0 고정). 즉 업그레이드로 버그가 고쳐지지 않았음.
+   - `docs/github-issue-maxfontsizemultiplier.md`의 Environment(버전/CLI info)와 Additional Context(0.87.0 재검증 결과)를 갱신, `~/Downloads` 사본도 동기화.
+6. ⏭️ **이미 올라간 GitHub 이슈 자체(본문 수정 또는 댓글)를 새 버전 정보로 업데이트할지는 아직 결정 안 됨** — outward-facing 작업이라 사용자 확인 필요. `gh` CLI 인증 여부도 재확인 필요.
 
 ## 하지 않아도 되는 것
 
