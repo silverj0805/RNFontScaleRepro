@@ -1,3 +1,5 @@
+> [react native issue link](https://github.com/react/react-native/issues/58124)
+
 ## What this is
 
 A minimal repro for a React Native bug on Android with the **New Architecture (Fabric)** enabled: `maxFontSizeMultiplier` correctly caps `fontSize`, but the rendered **line height / layout height** keeps growing with the device's raw system font scale, even when a value already capped in JS is passed explicitly.

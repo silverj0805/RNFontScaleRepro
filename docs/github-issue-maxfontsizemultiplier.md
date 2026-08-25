@@ -1,8 +1,4 @@
-> **Suggested title:** `maxFontSizeMultiplier` doesn't cap line height on Android (Fabric) — height keeps growing with device font scale even when JS pre-caps the value
->
-> **Reproducer (mandatory field):** public repository — https://github.com/silverj0805/RNFontScaleRepro (see its README for setup + screenshots)
->
-> **Affected Platforms (checkbox field on the issue form):** Runtime - Android
+# [Android] `maxFontSizeMultiplier` doesn't cap line height on Android (Fabric) — height keeps growing with device font scale even when JS pre-caps the value
 
 ## Description
 
@@ -10,7 +6,15 @@ On Android with the New Architecture (Fabric) enabled, `maxFontSizeMultiplier` d
 
 `fontSize` itself appears to be capped correctly (`min(fontScale, maxFontSizeMultiplier)`, matching `TextAttributeProps.getEffectiveFontSize()` / `PixelUtil.toPixelFromSP()`), but the **line height / leading** used for layout does not seem to go through the same capped calculation, and continues to track the device's raw font scale.
 
-## Steps to Reproduce
+## Expected Behavior
+
+With `maxFontSizeMultiplier` set to a fixed value, the effective scaling multiplier applied to a `<Text>` (including its line height / layout height) should never exceed that value, regardless of how much larger the device's actual system font scale is — matching the documented behavior ("Specifies the largest possible scale a font can reach when `allowFontScaling` is enabled").
+
+## Actual Behavior
+
+Rendered text height keeps growing with the device's real font scale even when `maxFontSizeMultiplier` is fixed and even when an already-capped `lineHeight` is explicitly supplied from JS. Only fully disabling `allowFontScaling` and computing sizes manually produces a stable, correctly-capped result.
+
+## Steps to reproduce
 
 **1. Minimal repro — fixed `maxFontSizeMultiplier`, size still varies by device font scale**
 
@@ -100,49 +104,37 @@ const lineHeight = fontSize * 1.1615;  // 34.845 in both cases
 
 Identical. This strongly suggests the leak only happens through the `allowFontScaling={true}` / SP-based native scaling path, and is avoided entirely by using `allowFontScaling={false}` with manual DIP-based sizing.
 
-### Screenshots
+## Additional Context
 
-From the [linked reproducer](https://github.com/silverj0805/RNFontScaleRepro), same `maxFontSizeMultiplier={1.5}` cap in every screenshot, only the device's actual font scale differs (1.5 vs 2.0):
+- We initially suspected this could be the previously-fixed issue in #47499 (Fabric ignoring `maxFontSizeMultiplier` entirely), fixed by #47614 and shipped in 0.78 — but that fix predates both our original 0.83.1 install and the 0.87.0 re-verification below, and the magnitude of the discrepancy (~14–20%) doesn't match "completely ignored" (which would produce a difference closer to the raw fontScale ratio, `2.0 / 1.5 ≈ 33%`).
+- We also ruled out the New Architecture "layout not recalculated after returning from background without a full restart" issue (#51768) by reproducing with a full cold start (force-quit + relaunch) between each font-scale change.
+- The pattern (fontSize appears correctly capped; line height / layout height does not) points at a discrepancy between the code path that sizes glyphs and the code path that determines line height/leading for layout purposes, but we were not able to pin down the exact native function responsible.
+- Minimal repro repository (local RN CLI project, `react-native@0.87.0`, New Architecture enabled, matches the environment above exactly): https://github.com/silverj0805/RNFontScaleRepro. [`src/App.tsx`](https://github.com/silverj0805/RNFontScaleRepro/blob/main/src/App.tsx) bundles all three cases above into one screen with tab switching and on-screen `PixelRatio.getFontScale()` / `onLayout` height readouts (see the screenshots above), so results can be checked without a console attached.
+- This bug was originally reproduced and reported against `react-native@0.83.1`. After the first version of this issue was flagged as targeting an unsupported version, the repro project was upgraded end-to-end to **0.87.0** (the latest stable release at time of writing) and re-verified on an **Android emulator** (Pixel 8 Pro, API 35, `font_scale` set via `adb shell settings put system font_scale <value>`, cold-started between changes) — **the bug reproduces identically on 0.87.0**, with `onLayout` height values matching to the sub-pixel:
 
-**The problem — case 1 (automatic `lineHeight`):**
+  | Test                                                   | fontScale=1.5 | fontScale=2.0 |
+  | ------------------------------------------------------ | ------------- | ------------- |
+  | 1 (auto lineHeight)                                    | 35.000000     | 40.333344     |
+  | 2 (explicit fixed lineHeight=36)                       | 36.000000     | 43.333313     |
+  | 3 (workaround: `allowFontScaling=false` + manual math) | 35.000000     | 35.000000     |
 
-| Device fontScale = 1.5                                                                                                                   | Device fontScale = 2.0                                                                                                                   |
-| ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| ![Case 1 at fontScale 1.5](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test1-fontscale-1.5.png) | ![Case 1 at fontScale 2.0](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test1-fontscale-2.0.png) |
+  Same shape as the physical-device numbers: Test 1 and 2 keep growing with the device's raw `fontScale` past the `1.5` cap, Test 3 stays exactly fixed — on a stock Pixel emulator, independent of the Galaxy S21/One UI hardware above, so this isn't Samsung-specific either. (These emulator numbers were measured with `ABC` as the sample text rather than the Hangul text shown in the physical-device numbers and code snippets above — the pattern is identical either way, since the leak is in the line-height calculation, not the glyphs.)
 
-**The problem — case 2 (explicit, pre-capped `lineHeight`):**
+## React Native Version
 
-| Device fontScale = 1.5                                                                                                                   | Device fontScale = 2.0                                                                                                                   |
-| ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| ![Case 2 at fontScale 1.5](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test2-fontscale-1.5.png) | ![Case 2 at fontScale 2.0](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test2-fontscale-2.0.png) |
+0.87.0
 
-**The workaround — case 3 (`allowFontScaling={false}` + manual math), for comparison:**
+## Affected Platforms
 
-| Device fontScale = 1.5                                                                                                                   | Device fontScale = 2.0                                                                                                                   |
-| ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| ![Case 3 at fontScale 1.5](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test3-fontscale-1.5.png) | ![Case 3 at fontScale 2.0](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test3-fontscale-2.0.png) |
+Runtime - Android
 
-## Expected Behavior
+## Areas
 
-With `maxFontSizeMultiplier` set to a fixed value, the effective scaling multiplier applied to a `<Text>` (including its line height / layout height) should never exceed that value, regardless of how much larger the device's actual system font scale is — matching the documented behavior ("Specifies the largest possible scale a font can reach when `allowFontScaling` is enabled").
+Fabric - The New Renderer
 
-## Actual Behavior
+## Output of `npx @react-native-community/cli info`
 
-Rendered text height keeps growing with the device's real font scale even when `maxFontSizeMultiplier` is fixed and even when an already-capped `lineHeight` is explicitly supplied from JS. Only fully disabling `allowFontScaling` and computing sizes manually produces a stable, correctly-capped result.
-
-## Stacktrace or Logs
-
-Not applicable — this is not a crash and produces no error, warning, or stack trace. The bug is a numeric layout discrepancy, demonstrated instead by the `onLayout` height measurements and screenshots above (same JS input, different rendered `height` depending on the device's raw font scale).
-
-## Environment
-
-- `react-native`: 0.87.0 (latest stable at time of writing; originally reproduced on 0.83.1, re-verified on 0.87.0 after that version was flagged as unsupported — see Additional Context)
-- Architecture: **New Architecture (Fabric)** enabled
-- Platform: Android
-- Device tested: Samsung Galaxy S21 (One UI), device font-size accessibility slider (8 steps, default step = fontScale 1.0)
-- `npx @react-native-community/cli info` output:
-
-```
+```text
 System:
   OS: macOS 26.4.1
   CPU: (8) arm64 Apple M1 Pro
@@ -232,18 +224,34 @@ iOS:
   newArchEnabled: true
 ```
 
-## Additional Context
+## Stacktrace or Logs
 
-- We initially suspected this could be the previously-fixed issue in #47499 (Fabric ignoring `maxFontSizeMultiplier` entirely), fixed by #47614 and shipped in 0.78 — but that fix predates both our original 0.83.1 install and the 0.87.0 re-verification below, and the magnitude of the discrepancy (~14–20%) doesn't match "completely ignored" (which would produce a difference closer to the raw fontScale ratio, `2.0 / 1.5 ≈ 33%`).
-- We also ruled out the New Architecture "layout not recalculated after returning from background without a full restart" issue (#51768) by reproducing with a full cold start (force-quit + relaunch) between each font-scale change.
-- The pattern (fontSize appears correctly capped; line height / layout height does not) points at a discrepancy between the code path that sizes glyphs and the code path that determines line height/leading for layout purposes, but we were not able to pin down the exact native function responsible.
-- Minimal repro repository (local RN CLI project, `react-native@0.87.0`, New Architecture enabled, matches the environment above exactly): https://github.com/silverj0805/RNFontScaleRepro. [`src/App.tsx`](https://github.com/silverj0805/RNFontScaleRepro/blob/main/src/App.tsx) bundles all three cases above into one screen with tab switching and on-screen `PixelRatio.getFontScale()` / `onLayout` height readouts (see the screenshots above), so results can be checked without a console attached.
-- This bug was originally reproduced and reported against `react-native@0.83.1`. After the first version of this issue was flagged as targeting an unsupported version, the repro project was upgraded end-to-end to **0.87.0** (the latest stable release at time of writing) and re-verified on an **Android emulator** (Pixel 8 Pro, API 35, `font_scale` set via `adb shell settings put system font_scale <value>`, cold-started between changes) — **the bug reproduces identically on 0.87.0**, with `onLayout` height values matching to the sub-pixel:
+```text
+Not applicable — this is not a crash and produces no error, warning, or stack trace. The bug is a numeric layout discrepancy, demonstrated instead by the `onLayout` height measurements and screenshots above (same JS input, different rendered `height` depending on the device's raw font scale).
+```
 
-  | Test                                                   | fontScale=1.5 | fontScale=2.0 |
-  | ------------------------------------------------------ | ------------- | ------------- |
-  | 1 (auto lineHeight)                                    | 35.000000     | 40.333344     |
-  | 2 (explicit fixed lineHeight=36)                       | 36.000000     | 43.333313     |
-  | 3 (workaround: `allowFontScaling=false` + manual math) | 35.000000     | 35.000000     |
+## MANDATORY Reproducer
 
-  Same shape as the physical-device numbers: Test 1 and 2 keep growing with the device's raw `fontScale` past the `1.5` cap, Test 3 stays exactly fixed — on a stock Pixel emulator, independent of the Galaxy S21/One UI hardware above, so this isn't Samsung-specific either. (These emulator numbers were measured with `ABC` as the sample text rather than the Hangul text shown in the physical-device numbers and code snippets above — the pattern is identical either way, since the leak is in the line-height calculation, not the glyphs.)
+https://github.com/silverj0805/RNFontScaleRepro
+
+## Screenshots and Videos
+
+From the [linked reproducer](https://github.com/silverj0805/RNFontScaleRepro), same `maxFontSizeMultiplier={1.5}` cap in every screenshot, only the device's actual font scale differs (1.5 vs 2.0):
+
+**The problem — case 1 (automatic `lineHeight`):**
+
+| Device fontScale = 1.5                                                                                                                   | Device fontScale = 2.0                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| ![Case 1 at fontScale 1.5](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test1-fontscale-1.5.png) | ![Case 1 at fontScale 2.0](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test1-fontscale-2.0.png) |
+
+**The problem — case 2 (explicit, pre-capped `lineHeight`):**
+
+| Device fontScale = 1.5                                                                                                                   | Device fontScale = 2.0                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| ![Case 2 at fontScale 1.5](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test2-fontscale-1.5.png) | ![Case 2 at fontScale 2.0](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test2-fontscale-2.0.png) |
+
+**The workaround — case 3 (`allowFontScaling={false}` + manual math), for comparison:**
+
+| Device fontScale = 1.5                                                                                                                   | Device fontScale = 2.0                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| ![Case 3 at fontScale 1.5](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test3-fontscale-1.5.png) | ![Case 3 at fontScale 2.0](https://raw.githubusercontent.com/silverj0805/RNFontScaleRepro/main/docs/screenshots/test3-fontscale-2.0.png) |
